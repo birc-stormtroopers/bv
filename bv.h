@@ -11,30 +11,39 @@ struct bv
     uint64_t data[];
 };
 
-static inline size_t bv_widx(size_t i)
-{
-    return i >> 6; // i divided by 64
-}
-static inline size_t bv_bidx(size_t i)
-{
-    return i & ((1lu << 6) - 1); // i mod 64
-}
+// Any optimising compiler will work out that / and % can be translated into
+// bit shifts and masking when it knows the divisor and the divisor is a power
+// of two.
+
+// clang-format off
+static inline size_t bv_widx(size_t i) { return i / 64; }
+static inline size_t bv_bidx(size_t i) { return i % 64; }
+// clang-format on
 
 static inline bool bv_get(struct bv *v, size_t i)
 {
-    uint64_t w = v->data[bv_widx(i)];
-    return !!(1 & (w >> bv_bidx(i)));
+    uint64_t w = v->data[bv_widx(i)]; // Get the word
+    return !!(1 & (w >> bv_bidx(i))); // shift the bit down and extract it
 }
 static inline void bv_set(struct bv *v, size_t i, bool b)
 {
-    uint64_t w = v->data[bv_widx(i)];
-    w = b ? (w | 1lu << bv_bidx(i)) : (w & ~(1lu << bv_bidx(i)));
-    v->data[bv_widx(i)] = w;
+    uint64_t w = v->data[bv_widx(i)]; // Get the word.
+    v->data[bv_widx(i)] =
+        b                                 // depending on the bit value
+            ? (w | 1lu << bv_bidx(i))     // mask the bit in
+            : (w & ~(1lu << bv_bidx(i))); // or mask all the other bits
 }
 
-struct bv *bv_new(size_t len);
+struct bv *bv_new(size_t len);                  // new vector all zeros
+struct bv *bv_new_from_string(const char *str); // vector spec on form "011010..."
 
 void bv_zero(struct bv *v);
 void bv_one(struct bv *v);
+void bv_neg(struct bv *v);
+
+void bv_or_assign(struct bv *v, struct bv const *w);  // v |= w
+void bv_and_assign(struct bv *v, struct bv const *w); // v &= w
+
+void bv_print(struct bv const *v);
 
 #endif // BV_H
