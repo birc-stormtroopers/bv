@@ -16,8 +16,7 @@ static void test_creation(void)
     {
         assert(bv_get(v, i) == true);
     }
-
-    //free(v); -- FIXME testing
+    free(v);
 }
 
 static void test_set(void)
@@ -49,13 +48,24 @@ static void test_neg(void)
     assert(bv_get(v, 2) == 0);
     assert(bv_get(v, 3) == 1);
 
+    struct bv *w = bv_copy(v);
+    assert(bv_get(w, 0) == 1);
+    assert(bv_get(w, 1) == 0);
+    assert(bv_get(w, 2) == 0);
+    assert(bv_get(w, 3) == 1);
+
     bv_neg(v);
     assert(bv_get(v, 0) == 0);
     assert(bv_get(v, 1) == 1);
     assert(bv_get(v, 2) == 1);
     assert(bv_get(v, 3) == 0);
+    assert(bv_get(w, 0) == 1);
+    assert(bv_get(w, 1) == 0);
+    assert(bv_get(w, 2) == 0);
+    assert(bv_get(w, 3) == 1);
 
     free(v);
+    free(w);
 }
 
 static void test_or(void)
@@ -96,6 +106,27 @@ static void test_and(void)
     free(w);
 }
 
+static void test_shift(void)
+{
+    struct bv *v = bv_new(512);
+    bv_set(v, 0, 1);
+    bv_print(v);
+    bv_shiftl(v, 1);
+    bv_print(v);
+    bv_shiftl(v, 2);
+    bv_print(v);
+    bv_shiftl(v, 4);
+    bv_print(v);
+    bv_shiftl(v, 8);
+    bv_print(v);
+    bv_shiftl(v, 16);
+    bv_print(v);
+    bv_shiftl(v, 32);
+    bv_print(v);
+    bv_shiftl(v, 64);
+    bv_print(v);
+}
+
 int main(void)
 {
     test_creation();
@@ -103,6 +134,7 @@ int main(void)
     test_neg();
     test_or();
     test_and();
+    test_shift();
 
     return 0;
 }

@@ -36,13 +36,19 @@ static inline void bv_set(struct bv *v, size_t i, bool b)
 
 struct bv *bv_new(size_t len);                  // new vector all zeros
 struct bv *bv_new_from_string(const char *str); // vector spec on form "011010..."
+struct bv *bv_copy(struct bv const *v);
 
 void bv_zero(struct bv *v);
 void bv_one(struct bv *v);
 void bv_neg(struct bv *v);
 
+void bv_shiftl(struct bv *v, size_t k);
+
 void bv_or_assign(struct bv *v, struct bv const *w);  // v |= w
 void bv_and_assign(struct bv *v, struct bv const *w); // v &= w
+
+struct bv *bv_or(struct bv const *v, struct bv const *w);  // v | w
+struct bv *bv_and(struct bv const *v, struct bv const *w); // v & w
 
 void bv_print(struct bv const *v);
 
