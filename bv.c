@@ -78,15 +78,48 @@ void bv_neg(struct bv *v)
 }
 
 // MARK Operations
-void bv_shiftl(struct bv *v, size_t k)
+void bv_shiftl(struct bv *v, size_t m)
 {
-    // FIXME: doesn't handle k>64
-    uint64_t tmp = 0;
-    for (size_t i = 0; i < no_words(v->len); i++)
+    size_t k = m % 64;
+    size_t offset = m / 64;
+
+    if (k == 0)
     {
-        uint64_t w = (v->data[i] << k) | tmp;
-        tmp = v->data[i] >> (64 - k);
-        v->data[i] = w;
+        // If k is zero we are moving whole words, and we might as well
+        // do that the easy way. In any case, the general code uses
+        // w >> (64 - k) which would be w >> 64 which is undefined for
+        // 64-bit words, so even if we took the complicated solution
+        // it wouldn't work for k == 0.
+        for (size_t i = offset; i < no_words(v->len); i++)
+        {
+            size_t ii = no_words(v->len) - i - 1;          // where we copy to
+            size_t jj = no_words(v->len) - i - offset - 1; // where we copy from
+            v->data[ii] = v->data[jj];
+        }
+    }
+    else
+    {
+        for (size_t i = offset; i < no_words(v->len); i++)
+        {
+            size_t ii = no_words(v->len) - i - 1;          // where we copy to
+            size_t jj = no_words(v->len) - i - offset - 1; // where we copy from
+            // u          w
+            // [....[xxx]][[yyyy]...] as bitvector, but as words
+            // [[xxx]....][...[yyyy]] (remember words read right-to-left, vector left-to-right)
+            // u >> (64 - k): [ 0000 [xxx]]
+            // w << k:        [[yyyy] 000 ]
+            // u | w:         [ yyyy  xxx ]
+            // as bitvector:  [ xxx  yyyy ]
+            uint64_t u = (jj > 0) ? (v->data[jj - 1] >> (64 - k)) : 0;
+            uint64_t w = (v->data[jj] << k);
+            v->data[ii] = u | w;
+        }
+    }
+
+    // zero the lower words, simulating that we shifted the bits up.
+    for (size_t i = 0; i < offset; i++)
+    {
+        v->data[i] = 0;
     }
 }
 
