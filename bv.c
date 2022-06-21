@@ -6,6 +6,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define IDX i_                      // The iteration index
+#define WORD(VEC) ((VEC)->data[i_]) // The word at the current index
+#define VEC_EACH(VEC, ...)                               \
+    for (size_t i_ = 0; i_ < no_words((VEC)->len); i_++) \
+    {                                                    \
+        __VA_ARGS__;                                     \
+    }
+
 // MARK: Construction
 static inline size_t no_words(size_t no_bits)
 {
@@ -45,35 +53,37 @@ struct bv *bv_new_from_string(const char *str)
 struct bv *bv_copy(struct bv const *v)
 {
     struct bv *w = bv_alloc(v->len);
-    for (size_t i = 0; i < no_words(w->len); i++)
-    {
-        w->data[i] = v->data[i];
-    }
+    VEC_EACH(v, WORD(w) = WORD(v));
     return w;
 }
 
 // MARK Initialisation
 void bv_zero(struct bv *v)
 {
-    for (size_t i = 0; i < no_words(v->len); i++)
-    {
-        v->data[i] = (uint64_t)0;
-    }
+    VEC_EACH(v, WORD(v) = (uint64_t)0);
 }
 
 void bv_one(struct bv *v)
 {
-    for (size_t i = 0; i < no_words(v->len); i++)
-    {
-        v->data[i] = ~(uint64_t)0;
-    }
+    VEC_EACH(v, WORD(v) = ~(uint64_t)0);
 }
 
 void bv_neg(struct bv *v)
 {
-    for (size_t i = 0; i < no_words(v->len); i++)
+    VEC_EACH(v, WORD(v) = ~WORD(v));
+}
+
+// A vector is "dirty" if there are set bits in the last word, beyond the
+// last bit. This can happen with shifts, but it complicates some computations
+// if we have to mask those out for comparisons or shifts. In those case,
+// we should "clean" the vector first.
+static void bv_clean(struct bv *v)
+{
+    size_t k = v->len % 64;
+    if (k != 0) // if k == 0 there are no extra bits.
     {
-        v->data[i] = ~v->data[i];
+        uint64_t mask = (1 << k) - 1;          // lower k words; we want to keep them.
+        v->data[no_words(v->len) - 1] &= mask; // remove the other bits.
     }
 }
 
@@ -121,34 +131,28 @@ void bv_shiftl(struct bv *v, size_t m)
     {
         v->data[i] = 0;
     }
+
+    // clean up the bits we might have shifted beyond the end
+    bv_clean(v);
 }
 
 void bv_or_assign(struct bv *v, struct bv const *w)
 {
     assert(v->len == w->len);
-    for (size_t i = 0; i < no_words(v->len); i++)
-    {
-        v->data[i] |= w->data[i];
-    }
+    VEC_EACH(v, WORD(v) |= WORD(w));
 }
 
 void bv_and_assign(struct bv *v, struct bv const *w)
 {
     assert(v->len == w->len);
-    for (size_t i = 0; i < no_words(v->len); i++)
-    {
-        v->data[i] &= w->data[i];
-    }
+    VEC_EACH(v, WORD(v) &= WORD(w));
 }
 
 struct bv *bv_or(struct bv const *v, struct bv const *w)
 {
     assert(v->len == w->len);
     struct bv *u = bv_alloc(v->len);
-    for (size_t i = 0; i < no_words(v->len); i++)
-    {
-        u->data[i] = v->data[i] | w->data[i];
-    }
+    VEC_EACH(u, WORD(u) = WORD(v) | WORD(w));
     return u;
 }
 
@@ -156,10 +160,7 @@ struct bv *bv_and(struct bv const *v, struct bv const *w)
 {
     assert(v->len == w->len);
     struct bv *u = bv_alloc(v->len);
-    for (size_t i = 0; i < no_words(v->len); i++)
-    {
-        u->data[i] = v->data[i] & w->data[i];
-    }
+    VEC_EACH(u, WORD(u) = WORD(v) & WORD(w));
     return u;
 }
 
@@ -167,21 +168,8 @@ bool bv_eq(struct bv const *v, struct bv const *w)
 {
     if (v->len != w->len)
         return false;
-
-    // Compare the first no_words - 1 as full words.
-    size_t i = 0;
-    for (; i < no_words(v->len) - 1; i++)
-    {
-        if (v->data[i] != w->data[i])
-            return false;
-    }
-
-    // For the last word, only compare the k first bits.
-    // The ? operator because the full word, k=64, becomes k=0
-    // with modulus.
-    size_t k = v->len % 64;
-    uint64_t mask = (k == 0) ? ~0 : (1 << k) - 1;
-    return (v->data[i] & mask) == (w->data[i] & mask);
+    VEC_EACH(v, if (WORD(v) != WORD(w)) return false);
+    return true;
 }
 
 // MARK I/O
