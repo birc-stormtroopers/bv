@@ -90,7 +90,7 @@ void bv_shiftl(struct bv *v, size_t m)
         // w >> (64 - k) which would be w >> 64 which is undefined for
         // 64-bit words, so even if we took the complicated solution
         // it wouldn't work for k == 0.
-        for (size_t i = offset; i < no_words(v->len); i++)
+        for (size_t i = 0; i < (no_words(v->len) - offset); i++)
         {
             size_t ii = no_words(v->len) - i - 1;          // where we copy to
             size_t jj = no_words(v->len) - i - offset - 1; // where we copy from
@@ -99,7 +99,7 @@ void bv_shiftl(struct bv *v, size_t m)
     }
     else
     {
-        for (size_t i = offset; i < no_words(v->len); i++)
+        for (size_t i = 0; i < (no_words(v->len) - offset); i++)
         {
             size_t ii = no_words(v->len) - i - 1;          // where we copy to
             size_t jj = no_words(v->len) - i - offset - 1; // where we copy from
@@ -161,6 +161,27 @@ struct bv *bv_and(struct bv const *v, struct bv const *w)
         u->data[i] = v->data[i] & w->data[i];
     }
     return u;
+}
+
+bool bv_eq(struct bv const *v, struct bv const *w)
+{
+    if (v->len != w->len)
+        return false;
+
+    // Compare the first no_words - 1 as full words.
+    size_t i = 0;
+    for (; i < no_words(v->len) - 1; i++)
+    {
+        if (v->data[i] != w->data[i])
+            return false;
+    }
+
+    // For the last word, only compare the k first bits.
+    // The ? operator because the full word, k=64, becomes k=0
+    // with modulus.
+    size_t k = v->len % 64;
+    uint64_t mask = (k == 0) ? ~0 : (1 << k) - 1;
+    return (v->data[i] & mask) == (w->data[i] & mask);
 }
 
 // MARK I/O

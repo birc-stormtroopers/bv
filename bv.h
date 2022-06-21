@@ -50,6 +50,8 @@ void bv_and_assign(struct bv *v, struct bv const *w); // v &= w
 struct bv *bv_or(struct bv const *v, struct bv const *w);  // v | w
 struct bv *bv_and(struct bv const *v, struct bv const *w); // v & w
 
+bool bv_eq(struct bv const *v, struct bv const *w); // v == w
+
 void bv_print(struct bv const *v);
 
 #endif // BV_H
