@@ -22,16 +22,16 @@ static inline size_t bv_bidx(size_t i) { return i % 64; }
 
 static inline bool bv_get(struct bv *v, size_t i)
 {
-    uint64_t w = v->data[bv_widx(i)]; // Get the word
-    return !!(1 & (w >> bv_bidx(i))); // shift the bit down and extract it
+    uint64_t w = v->data[bv_widx(i)];           // Get the word
+    return !!((uint64_t)1 & (w >> bv_bidx(i))); // shift the bit down and extract it
 }
 static inline void bv_set(struct bv *v, size_t i, bool b)
 {
     uint64_t w = v->data[bv_widx(i)]; // Get the word.
     v->data[bv_widx(i)] =
-        b                                 // depending on the bit value
-            ? (w | 1lu << bv_bidx(i))     // mask the bit in
-            : (w & ~(1lu << bv_bidx(i))); // or mask all the other bits
+        b                                         // depending on the bit value
+            ? (w | (uint64_t)1 << bv_bidx(i))     // mask the bit in
+            : (w & ~((uint64_t)1 << bv_bidx(i))); // or mask all the other bits
 }
 
 struct bv *bv_new(size_t len);                  // new vector all zeros
@@ -42,7 +42,8 @@ void bv_zero(struct bv *v);
 void bv_one(struct bv *v);
 void bv_neg(struct bv *v);
 
-void bv_shiftl(struct bv *v, size_t k);
+void bv_shift_up(struct bv *v, size_t k);   // v =<< k
+void bv_shift_down(struct bv *v, size_t k); // v =>> k
 
 void bv_or_assign(struct bv *v, struct bv const *w);  // v |= w
 void bv_and_assign(struct bv *v, struct bv const *w); // v &= w

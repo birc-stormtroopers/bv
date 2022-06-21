@@ -106,11 +106,11 @@ static void test_and(void)
     free(w);
 }
 
-static void test_shift(void)
+static void test_shift_up(void)
 {
     struct bv *v = bv_new(150);
     bv_set(v, 0, 1);
-    bv_shiftl(v, 0);
+    bv_shift_up(v, 0);
     struct bv *test = bv_new_from_string(
         // word 0
         "1000000000000000" // 0..15
@@ -129,7 +129,7 @@ static void test_shift(void)
     assert(bv_eq(v, test));
     free(test);
 
-    bv_shiftl(v, 1);
+    bv_shift_up(v, 1);
     test = bv_new_from_string(
         // word 0
         "0100000000000000" // 0..15
@@ -149,7 +149,7 @@ static void test_shift(void)
     free(test);
 
     bv_set(v, 0, 1);
-    bv_shiftl(v, 2);
+    bv_shift_up(v, 2);
     test = bv_new_from_string(
         // word 0
         "0011000000000000" // 0..15
@@ -169,7 +169,7 @@ static void test_shift(void)
     free(test);
 
     bv_set(v, 0, 1);
-    bv_shiftl(v, 4);
+    bv_shift_up(v, 4);
     test = bv_new_from_string(
         // word 0
         "0000101100000000" // 0..15
@@ -189,7 +189,7 @@ static void test_shift(void)
     free(test);
 
     bv_set(v, 0, 1);
-    bv_shiftl(v, 8);
+    bv_shift_up(v, 8);
     test = bv_new_from_string(
         // word 0
         "0000000010001011" // 0..15
@@ -209,7 +209,7 @@ static void test_shift(void)
     free(test);
 
     bv_set(v, 0, 1);
-    bv_shiftl(v, 16);
+    bv_shift_up(v, 16);
     test = bv_new_from_string(
         // word 0
         "0000000000000000" // 0..15
@@ -229,7 +229,7 @@ static void test_shift(void)
     free(test);
 
     bv_set(v, 0, 1);
-    bv_shiftl(v, 32);
+    bv_shift_up(v, 32);
     test = bv_new_from_string(
         // word 0
         "0000000000000000" // 0..15
@@ -249,7 +249,7 @@ static void test_shift(void)
     free(test);
 
     bv_set(v, 0, 1);
-    bv_shiftl(v, 64);
+    bv_shift_up(v, 64);
     test = bv_new_from_string(
         // word 0
         "0000000000000000" // 0..15
@@ -269,7 +269,7 @@ static void test_shift(void)
     free(test);
 
     bv_set(v, 0, 1);
-    bv_shiftl(v, 96);
+    bv_shift_up(v, 96);
     test = bv_new_from_string(
         // word 0
         "0000000000000000" // 0..15
@@ -294,8 +294,127 @@ static void test_shift(void)
         bv_zero(test);
 
         bv_set(v, 0, 1);
-        bv_shiftl(v, i);
+        bv_shift_up(v, i);
         bv_set(test, i, 1);
+
+        assert(bv_eq(v, test));
+    }
+
+    free(test);
+    free(v);
+}
+
+static void test_shift_down(void)
+{
+    struct bv *v = bv_new(150);
+    bv_set(v, 149, 1);
+    bv_shift_down(v, 0);
+    struct bv *test = bv_new_from_string(
+        // word 0
+        "0000000000000000" // 0..15
+        "0000000000000000" // 16..31
+        "0000000000000000" // 32..47
+        "0000000000000000" // 48..63
+        // word 1
+        "0000000000000000" // 64..79
+        "0000000000000000" // 80..95
+        "0000000000000000" // 96..111
+        "0000000000000000" // 112..127
+        // word 3
+        "0000000000000000" // 128..143
+        "000001"           // 144..149
+    );
+    assert(bv_eq(v, test));
+    free(test);
+
+    bv_shift_down(v, 1);
+    test = bv_new_from_string(
+        // word 0
+        "0000000000000000" // 0..15
+        "0000000000000000" // 16..31
+        "0000000000000000" // 32..47
+        "0000000000000000" // 48..63
+        // word 1
+        "0000000000000000" // 64..79
+        "0000000000000000" // 80..95
+        "0000000000000000" // 96..111
+        "0000000000000000" // 112..127
+        // word 3
+        "0000000000000000" // 128..143
+        "000010"           // 144..149
+    );
+    assert(bv_eq(v, test));
+    free(test);
+
+    bv_set(v, 149, 1);
+    bv_shift_down(v, 2);
+    test = bv_new_from_string(
+        // word 0
+        "0000000000000000" // 0..15
+        "0000000000000000" // 16..31
+        "0000000000000000" // 32..47
+        "0000000000000000" // 48..63
+        // word 1
+        "0000000000000000" // 64..79
+        "0000000000000000" // 80..95
+        "0000000000000000" // 96..111
+        "0000000000000000" // 112..127
+        // word 3
+        "0000000000000000" // 128..143
+        "001100"           // 144..149
+    );
+    assert(bv_eq(v, test));
+    free(test);
+
+    bv_set(v, 149, 1);
+    bv_shift_down(v, 4);
+    test = bv_new_from_string(
+        // word 0
+        "0000000000000000" // 0..15
+        "0000000000000000" // 16..31
+        "0000000000000000" // 32..47
+        "0000000000000000" // 48..63
+        // word 1
+        "0000000000000000" // 64..79
+        "0000000000000000" // 80..95
+        "0000000000000000" // 96..111
+        "0000000000000000" // 112..127
+        // word 3
+        "0000000000000011" // 128..143
+        "010000"           // 144..149
+    );
+    assert(bv_eq(v, test));
+    free(test);
+
+    bv_set(v, 149, 1);
+    bv_shift_down(v, 8);
+    test = bv_new_from_string(
+        // word 0
+        "0000000000000000" // 0..15
+        "0000000000000000" // 16..31
+        "0000000000000000" // 32..47
+        "0000000000000000" // 48..63
+        // word 1
+        "0000000000000000" // 64..79
+        "0000000000000000" // 80..95
+        "0000000000000000" // 96..111
+        "0000000000000000" // 112..127
+        // word 3
+        "0000001101000100" // 128..143
+        "000000"           // 144..149
+    );
+    assert(bv_eq(v, test));
+    free(test);
+
+    test = bv_new(150);
+    for (size_t i = 0; i < 150; i++)
+    {
+        bv_zero(v);
+        bv_zero(test);
+
+        bv_set(v, 149, 1);
+        bv_shift_down(v, i);
+        bv_set(test, 149 - i, 1);
 
         assert(bv_eq(v, test));
     }
@@ -311,7 +430,8 @@ int main(void)
     test_neg();
     test_or();
     test_and();
-    test_shift();
+    test_shift_up();
+    test_shift_down();
 
     return 0;
 }

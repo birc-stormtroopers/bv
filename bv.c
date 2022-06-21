@@ -6,12 +6,40 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define IDX i_                      // The iteration index
-#define WORD(VEC) ((VEC)->data[i_]) // The word at the current index
-#define VEC_EACH(VEC, ...)                               \
-    for (size_t i_ = 0; i_ < no_words((VEC)->len); i_++) \
-    {                                                    \
-        __VA_ARGS__;                                     \
+// Shifting uint64_t by 64 or more is undefined behaviour in C, but we want such
+// shifts to give us zero. It removes special cases here and there, not having to
+// check if k is 0 when doing someting like (w >> (64 - k)).
+#define RSHIFT(W, K) (((K) < 64) ? ((W) >> (K)) : 0)
+#define LSHIFT(W, K) (((K) < 64) ? ((W) << (K)) : 0)
+
+#define NWORDS(VEC) no_words((VEC)->len)
+
+// The word at the current index
+#define WORD(VEC) ((VEC)->data[i_])
+
+// Word offset to the left of the current index.
+#define WORD_BEFORE(VEC, OFFSET) \
+    (((OFFSET) <= i_) ? ((VEC)->data[i_ - (OFFSET)]) : (uint64_t)0)
+// Word offset to the right of the current index.
+#define WORD_AFTER(VEC, OFFSET) \
+    ((((OFFSET) + i_) < NWORDS(VEC)) ? ((VEC)->data[i_ + (OFFSET)]) : (uint64_t)0)
+
+// clang-format off
+#define EACH_WORD(VEC, ...)            EACH_WORD_FROM(VEC, 0, __VA_ARGS__)
+#define EACH_WORD_FROM(VEC, FROM, ...) EACH_WORD_RANGE(VEC, FROM, NWORDS(VEC), __VA_ARGS__)
+#define EACH_WORD_TO(VEC, TO, ...)     EACH_WORD_RANGE(VEC, 0, TO, __VA_ARGS__)
+#define EACH_WORD_RANGE(VEC, FROM, TO, ...)   \
+    for (size_t i_ = (FROM); i_ < (TO); i_++) \
+    {                                         \
+        __VA_ARGS__;                          \
+    }
+// clang-format on
+
+#define EACH_WORD_REV_TO(VEC, TO, ...)                      \
+    for (size_t ii_ = 0; ii_ < (NWORDS(VEC) - (TO)); ii_++) \
+    {                                                       \
+        size_t i_ = NWORDS(VEC) - ii_ - 1;                  \
+        __VA_ARGS__;                                        \
     }
 
 // MARK: Construction
@@ -53,24 +81,24 @@ struct bv *bv_new_from_string(const char *str)
 struct bv *bv_copy(struct bv const *v)
 {
     struct bv *w = bv_alloc(v->len);
-    VEC_EACH(v, WORD(w) = WORD(v));
+    EACH_WORD(v, WORD(w) = WORD(v));
     return w;
 }
 
 // MARK Initialisation
 void bv_zero(struct bv *v)
 {
-    VEC_EACH(v, WORD(v) = (uint64_t)0);
+    EACH_WORD(v, WORD(v) = (uint64_t)0);
 }
 
 void bv_one(struct bv *v)
 {
-    VEC_EACH(v, WORD(v) = ~(uint64_t)0);
+    EACH_WORD(v, WORD(v) = ~(uint64_t)0);
 }
 
 void bv_neg(struct bv *v)
 {
-    VEC_EACH(v, WORD(v) = ~WORD(v));
+    EACH_WORD(v, WORD(v) = ~WORD(v));
 }
 
 // A vector is "dirty" if there are set bits in the last word, beyond the
@@ -88,49 +116,45 @@ static void bv_clean(struct bv *v)
 }
 
 // MARK Operations
-void bv_shiftl(struct bv *v, size_t m)
+
+void bv_shift_up(struct bv *v, size_t m)
 {
     size_t k = m % 64;
     size_t offset = m / 64;
 
-    if (k == 0)
-    {
-        // If k is zero we are moving whole words, and we might as well
-        // do that the easy way. In any case, the general code uses
-        // w >> (64 - k) which would be w >> 64 which is undefined for
-        // 64-bit words, so even if we took the complicated solution
-        // it wouldn't work for k == 0.
-        for (size_t i = 0; i < (no_words(v->len) - offset); i++)
-        {
-            size_t ii = no_words(v->len) - i - 1;          // where we copy to
-            size_t jj = no_words(v->len) - i - offset - 1; // where we copy from
-            v->data[ii] = v->data[jj];
-        }
-    }
-    else
-    {
-        for (size_t i = 0; i < (no_words(v->len) - offset); i++)
-        {
-            size_t ii = no_words(v->len) - i - 1;          // where we copy to
-            size_t jj = no_words(v->len) - i - offset - 1; // where we copy from
-            // u          w
-            // [....[xxx]][[yyyy]...] as bitvector, but as words
-            // [[xxx]....][...[yyyy]] (remember words read right-to-left, vector left-to-right)
-            // u >> (64 - k): [ 0000 [xxx]]
-            // w << k:        [[yyyy] 000 ]
-            // u | w:         [ yyyy  xxx ]
-            // as bitvector:  [ xxx  yyyy ]
-            uint64_t u = (jj > 0) ? (v->data[jj - 1] >> (64 - k)) : 0;
-            uint64_t w = (v->data[jj] << k);
-            v->data[ii] = u | w;
-        }
-    }
+    // From offset and up, we shift and or to get the bit patterns,
+    // going through the words in reverse.
+    // clang-format off
+    EACH_WORD_REV_TO(v, offset, {
+        uint64_t u = WORD_BEFORE(v, offset + 1);
+        uint64_t w = WORD_BEFORE(v, offset);
+        WORD(v) = RSHIFT(u, 64 - k) | LSHIFT(w, k);
+    })
+    // clang-format on
 
     // zero the lower words, simulating that we shifted the bits up.
-    for (size_t i = 0; i < offset; i++)
-    {
-        v->data[i] = 0;
-    }
+    EACH_WORD_TO(v, offset, WORD(v) = 0);
+
+    // clean up the bits we might have shifted beyond the end
+    bv_clean(v);
+}
+
+void bv_shift_down(struct bv *v, size_t m)
+{
+    size_t k = m % 64;
+    size_t offset = m / 64;
+
+    // From zero up to (n - offset) we shift and or to get the bit patterns.
+    // clang-format off
+    EACH_WORD_TO(v, NWORDS(v) - offset, {
+        uint64_t u = WORD_AFTER(v, offset);
+        uint64_t w = WORD_AFTER(v, offset + 1);
+        WORD(v) = RSHIFT(u, k) | LSHIFT(w, 64 - k);
+    })
+    // clang-format on
+
+    // zero the upper words, simulating that we shifted the bits down.
+    EACH_WORD_REV_TO(v, NWORDS(v) - offset, WORD(v) = 0);
 
     // clean up the bits we might have shifted beyond the end
     bv_clean(v);
@@ -139,20 +163,20 @@ void bv_shiftl(struct bv *v, size_t m)
 void bv_or_assign(struct bv *v, struct bv const *w)
 {
     assert(v->len == w->len);
-    VEC_EACH(v, WORD(v) |= WORD(w));
+    EACH_WORD(v, WORD(v) |= WORD(w));
 }
 
 void bv_and_assign(struct bv *v, struct bv const *w)
 {
     assert(v->len == w->len);
-    VEC_EACH(v, WORD(v) &= WORD(w));
+    EACH_WORD(v, WORD(v) &= WORD(w));
 }
 
 struct bv *bv_or(struct bv const *v, struct bv const *w)
 {
     assert(v->len == w->len);
     struct bv *u = bv_alloc(v->len);
-    VEC_EACH(u, WORD(u) = WORD(v) | WORD(w));
+    EACH_WORD(u, WORD(u) = WORD(v) | WORD(w));
     return u;
 }
 
@@ -160,7 +184,7 @@ struct bv *bv_and(struct bv const *v, struct bv const *w)
 {
     assert(v->len == w->len);
     struct bv *u = bv_alloc(v->len);
-    VEC_EACH(u, WORD(u) = WORD(v) & WORD(w));
+    EACH_WORD(u, WORD(u) = WORD(v) & WORD(w));
     return u;
 }
 
@@ -168,7 +192,7 @@ bool bv_eq(struct bv const *v, struct bv const *w)
 {
     if (v->len != w->len)
         return false;
-    VEC_EACH(v, if (WORD(v) != WORD(w)) return false);
+    EACH_WORD(v, if (WORD(v) != WORD(w)) return false);
     return true;
 }
 
