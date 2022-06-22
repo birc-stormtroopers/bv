@@ -63,6 +63,54 @@ If the words are composed of multiple bytes, we run into another issue. If we in
 So, to boil all this down: if we want to manipulate data, we can get it in chunks of 1, 2, 4, or 8 (or maybe more) bytes, but not bits. If we use a `bool array[n]` array in C, we get one byte per value, and we thus use eight time as much memory was we need. For `[True] * n` in Python, we use 4 bytes, or 64 bits, instead of one bit, per entry. We are going to improve on that.
 
 
+## Getting an array of bits
+
+If we cannot address individual bits, but have to use multi-byte words, we have to store our bits in the larger word-size, and we must code our way out of accessing the individual bits in the larger words.
+
+Let's first consider how we get bits in and out of individual words; getting to the words is comparatively easy and we will do that afterwards.
+
+Let's say we have a word `w`. It doesn't matter how many bits it has, but in the figure below it is a 32-bit word. Then, let's say we want bit 17 in it. With binary numbers we write them the same as we do with decimal numbers: the most significant bit (digit) first and the least signifcant bit (digit) last. In decimal, 42 means 4 tens and two ones, and in binary, 101, means one fours, zero twos and one ones. You read the number left to right this way. When I draw a binary word, I do the same thing; the most significant bit is to the left and the least significant bit is to the right. I also number bit positions from zero, because I am a computer scientist, so the bits in a 32-bit word goes 31, 30, ..., 2, 1, 0, and bit 17 is number 18 (because we count from zero) from the right (because we write numbers in that order). Got it?
+
+To get bit 17, we can shift all the bits in the word 17 to the right. There are 17 bits to the right of bit 17 (again because we count from zero). Shifting right by 17 throws those away (but we will be doing this in a local variable so the won't be lost in the bit vector we implement). On the left, we shift 17 bits in, and if we use unsigned integers we get zeros there. If we use signed integers, it's more complicated (and in C you don't know what you get), so use unsigned when you manipulate bits unless you are sure you know what you are doing.
+
+Ok, so `w >> 17` moves bit 17 down to position 0, and to get the value of that bit, and only that bit, you can mask it out using a mask that has a one at bit 0 and zeros everywhere else. That is the number 1. That's all; to get bit `k` in a word, do `(w >> k) & 1`.
+
+![Get a bit](figs/bv/get.png)
+
+
+Well, that is almost all. The literal `1` might have a different type and thus a different number of bits, and things can go wrong if you just assume that `1` and `0` are, say, 32 or 64 bits. To make sure it works, you should give them the right type. It isn't necessary here, but it is a good habit to get into. So for 32-bit integers, a better solution would be `(w >> k) & (uint32_t)1`.
+
+Another issue is the value `k`. What happens if `k` is equal to or greater than the word size, here if `k >= 32`? Well, that depends on your programming language and your computer. In C, the ever so helpful language, it is [undefined behaviour](https://en.wikipedia.org/wiki/Undefined_behavior). That typically means that whatever the hardware does is what will happen, but it could mean literally anything, so don't do it. Never shift by the wordsize or larger. If you don't, you are fine.
+
+If you want to set a bit to 1, you do something similar. Let's say we want to set bit 17 in `w` to 1. Then we can shift a 1 17 positions to the left, `(uint32_t)1 << 17`. (Here, making sure the integer has the right word size is usually important, since shifting a smaller integer doesn't affect all the 32 bits.) Now you have a word that has zeros everywhere except for bit 17, which is a 1. If you OR this mask with your word, bit 17 is set to one because it is one in the mask, and all the other bits retain their value, as they are OR'ed with zeros.
+
+![Set a bit to 1](figs/bv/set-1.png)
+
+If you want to set a bit to zero, there is an additional step. You still shift a one up to the position you want to change, in the figure bit 17, but you want to flip it to zero so you cannot OR here. To flip it, you can negate the mask, i.e., flip all the bits in the mask, to get a word that has a zero at bit 17 and ones everywhere else. If you AND that with your word, all the ones will leave the word's bits as they are, but the position you want to set to zero has a zero in the mask, so the result there is also zero.
+
+![Set a bit to 0](figs/bv/set-0.png)
+
+If our bit vector fits into a single computer word, 8-bit, 16-bit, 32-bit or 64-bit, then that would be all. We can access and modify individual bits with these short commands. But if the vector is longer, we need more than one word.
+
+Of course, a sequence of multiple words is just an array of words, so we already know how to get that. If we needed a bit vector of length 150, we could use 19 bytes, 10 17-bit words, five 32-bit words or three 64-bit words.
+
+```c
+// To get the number of words, divide n by ws and round up.
+size_t round_up(size_t n, size_t ws) {
+    return (n + ws - 1) / ws;
+}
+
+uint8_t byte_vec[round_up(150, 8)];  // representing bits in bytes
+uint16_t w16_vec[round_up(150, 16)]; // representing bits as 16-bit words
+uint32_t w32_vec[round_up(150, 32)]; // representing bits as 32-bit words
+uint64_t w64_vec[round_up(150, 64)]; // representing bits as 64-bit words
+```
+
+You have larger word sizes, but these will fit into registers on my machine.
+
+Now the only question is how we will access bit `k` in such an array of words?
+
+
 
 
 [^1]: But not more than $2^{64} \approx 1.8\times 10^{19}$ with 64-bit pointers, and actually less on modern 64-bit systems, but this limit is far higher than the limit set by your physical memory available.
