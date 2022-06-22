@@ -11,5 +11,7 @@ CTestTestfile.cmake
 _deps
 xcodebuild/
 makebuild/
+bv_test
 libbv.a
-build/bv_test
+sao
+build/

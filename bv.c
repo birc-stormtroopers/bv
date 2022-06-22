@@ -86,19 +86,22 @@ struct bv *bv_copy(struct bv const *v)
 }
 
 // MARK Initialisation
-void bv_zero(struct bv *v)
+struct bv *bv_zero(struct bv *v)
 {
     EACH_WORD(v, WORD(v) = (uint64_t)0);
+    return v;
 }
 
-void bv_one(struct bv *v)
+struct bv *bv_one(struct bv *v)
 {
     EACH_WORD(v, WORD(v) = ~(uint64_t)0);
+    return v;
 }
 
-void bv_neg(struct bv *v)
+struct bv *bv_neg(struct bv *v)
 {
     EACH_WORD(v, WORD(v) = ~WORD(v));
+    return v;
 }
 
 // A vector is "dirty" if there are set bits in the last word, beyond the
@@ -117,7 +120,7 @@ static void bv_clean(struct bv *v)
 
 // MARK Operations
 
-void bv_shift_up(struct bv *v, size_t m)
+struct bv *bv_shift_up(struct bv *v, size_t m)
 {
     size_t k = m % 64;
     size_t offset = m / 64;
@@ -137,9 +140,11 @@ void bv_shift_up(struct bv *v, size_t m)
 
     // clean up the bits we might have shifted beyond the end
     bv_clean(v);
+
+    return v;
 }
 
-void bv_shift_down(struct bv *v, size_t m)
+struct bv *bv_shift_down(struct bv *v, size_t m)
 {
     size_t k = m % 64;
     size_t offset = m / 64;
@@ -158,18 +163,22 @@ void bv_shift_down(struct bv *v, size_t m)
 
     // clean up the bits we might have shifted beyond the end
     bv_clean(v);
+
+    return v;
 }
 
-void bv_or_assign(struct bv *v, struct bv const *w)
+struct bv *bv_or_assign(struct bv *v, struct bv const *w)
 {
     assert(v->len == w->len);
     EACH_WORD(v, WORD(v) |= WORD(w));
+    return v;
 }
 
-void bv_and_assign(struct bv *v, struct bv const *w)
+struct bv *bv_and_assign(struct bv *v, struct bv const *w)
 {
     assert(v->len == w->len);
     EACH_WORD(v, WORD(v) &= WORD(w));
+    return v;
 }
 
 struct bv *bv_or(struct bv const *v, struct bv const *w)

@@ -8,3 +8,5 @@ add_executable(bv_test bv_test.c)
 target_link_libraries(bv_test bv)
 add_test(bv_test bv_test)
 
+add_executable(sao sao.c)
+target_link_libraries(sao bv)
