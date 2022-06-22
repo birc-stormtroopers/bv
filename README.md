@@ -110,6 +110,47 @@ You have larger word sizes, but these will fit into registers on my machine.
 
 Now the only question is how we will access bit `k` in such an array of words?
 
+**FIXME: more**
+
+![Bit vector spanning multiple words](figs/bv/array-of-words.png)
+
+```c
+struct bv
+{
+    size_t len;
+    uint64_t data[];
+};
+
+// Any optimising compiler will work out that / and % can be translated into
+// bit shifts and masking when it knows the divisor and the divisor is a power
+// of two.
+
+// clang-format off
+static inline size_t bv_widx(size_t i) { return i / 64; }
+static inline size_t bv_bidx(size_t i) { return i % 64; }
+// clang-format on
+
+static inline bool bv_get(struct bv *v, size_t i)
+{
+    uint64_t w = v->data[bv_widx(i)];           // Get the word
+    return !!((uint64_t)1 & (w >> bv_bidx(i))); // shift the bit down and extract it
+}
+// Returns itself so we can chain calls. NOTE: this is not an expression
+// but a modification, so it has side-effects. Be careful with using this
+// in calls where you use the same vector in multiple expressions, since
+// the evaluation order is not defined in C.
+static inline struct bv *bv_set(struct bv *v, size_t i, bool b)
+{
+    uint64_t w = v->data[bv_widx(i)]; // Get the word.
+    v->data[bv_widx(i)] =
+        b                                         // depending on the bit value
+            ? (w | (uint64_t)1 << bv_bidx(i))     // mask the bit in
+            : (w & ~((uint64_t)1 << bv_bidx(i))); // or mask all the other bits
+    return v;
+}
+```
+
+
 
 
 
