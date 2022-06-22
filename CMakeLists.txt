@@ -10,3 +10,5 @@ add_test(bv_test bv_test)
 
 add_executable(sao sao.c)
 target_link_libraries(sao bv)
+
+add_executable(sao_raw sao_raw.c)

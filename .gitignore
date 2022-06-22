@@ -15,3 +15,4 @@ bv_test
 libbv.a
 sao
 build/
+sao_raw
