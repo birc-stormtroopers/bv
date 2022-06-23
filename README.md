@@ -599,8 +599,8 @@ int main(int argc, const char *argv[])
 
     const char *x = argv[1];
     const char *p = argv[2];
-    size_t n = strlen(x); // FlawFinder: ignore
-    size_t m = strlen(p); // FlawFinder: ignore
+    size_t n = strlen(x);
+    size_t m = strlen(p);
 
     struct bv **pmask = build_pattern_masks(m, p);
     struct bv *match = bv_one(bv_new(m));
