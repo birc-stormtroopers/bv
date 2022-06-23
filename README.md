@@ -535,6 +535,158 @@ In the figure, I have used a subscript for `i`, rather than an index into the ta
 
 Notice that from the definition, if `match[m - 1] == 0` we know that there are no mismatches between the two sub-strings, and when we are looking at `m - 1`, we are looking at the entire string `p`. (Usually, we use indices `foo[i:j]` to indicate the range from `i` included to `j` excluded, and I do that in the notation in the figure as well, but the `match` table tells us if we have a mismatch in the strings up-to-and-included. The last index in `p` is `m - 1` so if there are no mismatches up to there, i.e. `match[m - 1] == 0`, then we have a match).
 
+We could compute each value in `match[i,j]` by comparing strings, it would take $O(n^3)$, but the idea is of course to compute it faster. Consider what you need to know to compute `match[i,j]`, i.e., whether there are any mismatches between the two strings that end in `(i,j)`. There we observe that there will be a mismatch if either there is one in the previous strings, `(i-1,j-1)`, or if `p[j] != x[i]`, and we can use an OR to combine these two.
+
+![Updating match vector](figs/shift-and-or/update.png)
+
+But then we can also observe that looking at `match[i-1,j-1]` to compute `match[i,j]` resembles a shift of `match[i-1,:]`. If we shift the bits in `match[i-1,:]` one up, we move each `match[i-1,j-1]` to position `j`, and there we can OR it with a vector, pmask[i,j]` that for each index `j` has `p[j] != x[i]`.
+
+![Update match with a shift](figs/shift-and-or/update-shift.png)
+
+We just need such a `pmask`. It doesn't depend on the actual `i`, just the letter `x[i]`, so we can precompute such vectors for each letter in our alphabet. Just start by setting each bit to zero, and then set to zero the indices `j` where you have a match.
+
+![pmask](figs/shift-and-or/pmask.png)
+
+This will take time $O(m\mathrm{ws} + m)$, see the code below for details.
+
+```c
+#define sigma 256 // size of alphabet (assumed one byte letters)
+
+static struct bv **build_pattern_masks(size_t m, const char p[m])
+{
+    struct bv **pmask = malloc(sigma * sizeof *pmask);
+    assert(pmask);
+
+    // Build table of all ones
+    for (size_t a = 0; a < sigma; a++)
+    {
+        pmask[a] = bv_set(
+            bv_one(bv_new(m)),
+            m, 0);
+    }
+
+    // Set matches to zero
+    for (size_t i = 0; i < m; i++)
+    {
+        // Set pmatch[a]'s i'th bit to 0 if there is an a
+        // at index i in the pattern.
+        bv_set(pmask[(unsigned)p[i]], i, 0);
+    }
+
+    return pmask;
+}
+
+static void free_pattern_masks(struct bv **pmask)
+{
+    for (size_t a = 0; a < sigma; a++)
+    {
+        free(pmask[a]);
+    }
+    free(pmask);
+}
+```
+
+From here on, it is just following the algorithm. Run through each index in `x`, shift the current match vector and OR it with the relevant mask, and then check if you have a match.
+
+```c
+int main(int argc, const char *argv[])
+{
+    if (argc != 3)
+    {
+        fprintf(stderr, "Usage: %s string pattern\n", argv[0]);
+        return 1;
+    }
+
+    const char *x = argv[1];
+    const char *p = argv[2];
+    size_t n = strlen(x); // FlawFinder: ignore
+    size_t m = strlen(p); // FlawFinder: ignore
+
+    struct bv **pmask = build_pattern_masks(m, p);
+    struct bv *match = bv_one(bv_new(m));
+
+    for (size_t i = 0; i < n; i++)
+    {
+        // match = (match << 1) | mask[x[i]]
+        bv_or_assign(
+            bv_shift_up(match, 1),
+            pmask[(unsigned)x[i]]);
+
+        if (bv_get(match, m - 1) == 0)
+        {
+            printf("match at: %lu\n", i - m + 1);
+        }
+    }
+
+    free(match);
+    free_pattern_masks(pmask);
+
+    return 0;
+}
+```
+
+Using the generic bit vectors is a bit of overkill for typical applications where you would use this algorithm. It is fast if the patterns are small and we can pack the bit vectors into single words, but if you need to process larger patterns you are better off with other algorithms.
+
+If you are going to use this algorithm, you would probably just use bit vectors you could fit in single words, and then the code is slightly simpler:
+
+```c
+#define word uint64_t
+#define WORD_SIZE 64
+#define sigma 256 // size of alphabet (assumed one byte letters)
+
+int main(int argc, const char *argv[])
+{
+    if (argc != 3)
+    {
+        fprintf(stderr, "Usage: %s string pattern\n", argv[0]);
+        return 1;
+    }
+
+    const char *x = argv[1];
+    const char *p = argv[2];
+    size_t n = strlen(x);
+    size_t m = strlen(p);
+
+    if (m >= WORD_SIZE)
+    {
+        fprintf(stderr, "Pattern too long.\n");
+        return 1;
+    }
+
+    word *pmask = malloc(sigma * sizeof *pmask);
+    assert(pmask); // abort on allocation failure (unlikely as it is).
+
+    // Set all bits to 1. memset() does it for bytes, but if we set all the
+    // bytes to 0xff then we also set all the bits to one.
+    memset(pmask, 0xff, sigma * sizeof *pmask);
+
+    // Set matches to zero
+    word match = (word)1; // Moves 1 up through the length of p
+    for (size_t i = 0; i < m; i++, match <<= 1)
+    {
+        // Set pmatch[a]'s i'th bit to 0 if there is an a
+        // at index i in the pattern.
+        pmask[(unsigned)p[i]] &= ~match; // set the match-bit to zero
+    }
+
+    match = ~(word)0;                    // state vector through the scan
+    word check_bit = (word)1 << (m - 1); // (m-1)'th bit for checking matches
+    for (size_t i = 0; i < n; i++)
+    {
+        match = (match << 1) | pmask[(unsigned)x[i]];
+        if ((match & check_bit) == 0)
+        {
+            printf("match at: %lu\n", i - m + 1);
+        }
+    }
+
+    free(pmask);
+
+    return 0;
+}
+```
+
+I hope this has given you an idea of how to implement and manipulate bit vectors, whether you want generic implementations or just application-tailored ones. Their usage goes far beyond simple string algorithms like the one we have seen, so it is worth familiarising yourself with them.
 
 
 
