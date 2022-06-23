@@ -525,6 +525,15 @@ $O(nm)$ algorithm that we can speed up with bit vectors.
 The *SHIFT-and-OR* algorithm uses time $O(nm/\mathrm{ws})$, which if word sizes are constant (which they are) is still
 $O(nm)$, but if the word size is 64 you are potentially dividing the running time by 64. (It isn't quite that good, because there is additioanl overhead in the SHIFT-and-OR algorithm, but it usually is a rather fast algorithm in many applications).
 
+The idea will be to match several prefixes of our pattern against a character in `x`, in parellel. Word-size of them, so we can use parallel bit-operations to do it.
+
+But first, imagine that we had a table `match[i,j]` that encoded whether the prefix of `p` that ends at index `j` matches the length-`j+1` substring of `x` that ends at index `i`. The way the bit operations will be encoded, we won't use 1 to indicate that these two string match, but that they mismatch. Of course, that just means that `match[i,j]` is zero when the two strings match, so it is the same information, it is just that the operations can be done a little easier.
+
+![Match table for SHIFT-and-OR](figs/shift-and-or/match-table.png)
+
+In the figure, I have used a subscript for `i`, rather than an index into the table. This is because we will end up not using multiple rows, and the index `i` will be implicit in the algorithm. We will actually only have a single bit vector `match` that we can index from zero to `m - 1`.
+
+Notice that from the definition, if `match[m - 1] == 0` we know that there are no mismatches between the two sub-strings, and when we are looking at `m - 1`, we are looking at the entire string `p`. (Usually, we use indices `foo[i:j]` to indicate the range from `i` included to `j` excluded, and I do that in the notation in the figure as well, but the `match` table tells us if we have a mismatch in the strings up-to-and-included. The last index in `p` is `m - 1` so if there are no mismatches up to there, i.e. `match[m - 1] == 0`, then we have a match).
 
 
 
