@@ -431,6 +431,8 @@ struct bv *bv_shift_up(struct bv *v, size_t m)
 }
 ```
 
+When iterating through the words, we should do that in reverse, so we don't accidentally overwrite a word we are going to use later. We always refer to words at the current word-index or earlier, so running through the words right-to-left is safe.
+
 After shifting, the initial words in the array should hold zeros, since that is what we expect to shift in from the edge when we shift, and I explicitly set those. Then I use `bv_clean(v)` to clean up the bits I shifted out into the unused bit, to ensure that they behave like zeros from here on. (They will behave like zeros if the *are* zeros).
 
 You could also split the shifting function into two parts, since shifting an integral number of words is easier and cheaper than dealing with `k > 0`, and then you don't have to deal with the case when `ws-k == ws`, so you could get a faster version.
@@ -467,6 +469,8 @@ struct bv *bv_shift_up(struct bv *v, size_t m)
 ```
 
 I'm not sure which version I prefer myself.
+
+Shifting down is very similar. There, you will look at words to the right, so you should iterate left-to-right, and the shifting is in the other direction, but otherwise there should be nothing surprising in it.
 
 ```c
 struct bv *bv_shift_down(struct bv *v, size_t m)
