@@ -175,7 +175,7 @@ struct bv *bv_new(size_t len)
 
 struct bv *bv_new_from_string(const char *str)
 {
-    size_t len = strlen(str); // FlawFinder: ignore (I know about '\0')
+    size_t len = strlen(str);
     struct bv *v = bv_alloc(len);
     for (size_t i = 0; *str; i++, str++)
     {
@@ -386,7 +386,110 @@ struct bv *bv_and(struct bv const *v, struct bv const *w)
 
 The functions that can set any of the unused bits must call `bv_clean()`. Of the above, those are `bv_one()` that will set all bits to one, so some must be flipped back, and `bv_neg()` that will leave one-bits where there were previously zero-bits. For the others, if the input vectors are clean, then the output will also be clean.
 
+The shift operations are the hardest, because there we cannot operate on the vector one word at a time. Consider first shifting up, by which I mean moving each bit $b_i$
+in the bit vector to position $b_{i+k}$. If we draw this situation with the usual vector view, with indices going left to right, we want to move bits as in the figure below:
 
+![Shifting up, vector view](figs/bv/shift-up.png)
+
+If `offset` is the integral number of words we shift (could be zero if we shift by less than a full word size, or it could be larger), then a word at index `i` will get bits from index `i-offset-1` and `i-offset`. In the drawing, and the code, I use `offset+1` and `offset` because I index an *offset before* the current index, but it amounts to the same thing. If `k` is the additional bits we need to shift after we have shifted the full number of words, then the word `offset+1` before the current word will contribute `k` bits, that will go at the first `k` bits of the current word. The word at `offset` before the current will contribute the remaining `ws - k` bits, and these will go after the `k` bits we got from the `offset+1`-before word.
+
+To move the bits around, we need to take the word-view of the bits, because it is on words we have operations to shift. That just means reversing the order of the bits in each word, because we number the within-word bits from right to left. There we see that it is the lower `k` words in the `offset+1`-before word we need, but shifted so they become the `k` high bits in the current word, and we need the `ws - k` high bits in the `offset`-before word.
+
+![Shifting up, word view](figs/bv/shift-up-word-view.png)
+
+To get the `k` bits we want from the first word down to where they should sit, we shift by `ws - k`, and to get the `ws-k` bits from the second word up where they belong, we shift by `k`. The shifts will leave zeros at the positions we shift in from the edges, so if we OR the two shifted words we get the word we want.
+
+Here we have to be careful once more. The shift `u >> (ws - k)` is undefined if `k == 0`, i.e. we are shiftin an integral number of words, since then `ws - k = ws` and shifting by a full word size might be undefined (as it is in C). It is an annoying special case that I got around by defining a macro that would give me a word of all zero bits if I tried to shift more than the word length. 
+
+```c
+// Shifting uint64_t by 64 or more is undefined behaviour in C, but we want such
+// shifts to give us zero. It removes special cases here and there, not having to
+// check if k is 0 when doing someting like (w >> (64 - k)).
+#define RSHIFT(W, K) (((K) < 64) ? ((W) >> (K)) : 0)
+#define LSHIFT(W, K) (((K) < 64) ? ((W) << (K)) : 0)
+
+struct bv *bv_shift_up(struct bv *v, size_t m)
+{
+    size_t k = m % 64;
+    size_t offset = m / 64;
+
+    // From offset and up, we shift and or to get the bit patterns,
+    // going through the words in reverse.
+    EACH_WORD_REV_TO(v, offset, {
+        uint64_t u = WORD_BEFORE(v, offset + 1);
+        uint64_t w = WORD_BEFORE(v, offset);
+        WORD(v) = RSHIFT(u, 64 - k) | LSHIFT(w, k);
+    })
+
+    // zero the lower words, simulating that we shifted the bits up.
+    EACH_WORD_TO(v, offset, WORD(v) = 0);
+
+    // clean up the bits we might have shifted beyond the end
+    bv_clean(v);
+
+    return v;
+}
+```
+
+After shifting, the initial words in the array should hold zeros, since that is what we expect to shift in from the edge when we shift, and I explicitly set those. Then I use `bv_clean(v)` to clean up the bits I shifted out into the unused bit, to ensure that they behave like zeros from here on. (They will behave like zeros if the *are* zeros).
+
+You could also split the shifting function into two parts, since shifting an integral number of words is easier and cheaper than dealing with `k > 0`, and then you don't have to deal with the case when `ws-k == ws`, so you could get a faster version.
+
+```c
+struct bv *bv_shift_up(struct bv *v, size_t m)
+{
+    size_t k = m % 64;
+    size_t offset = m / 64;
+
+    if (k == 0)
+    {
+        EACH_WORD_REV_TO(v, offset, WORD(v) = WORD_BEFORE(v, offset));
+    }
+    else
+    {
+        // From offset and up, we shift and or to get the bit patterns,
+        // going through the words in reverse.
+        EACH_WORD_REV_TO(v, offset, {
+            uint64_t u = WORD_BEFORE(v, offset + 1);
+            uint64_t w = WORD_BEFORE(v, offset);
+            WORD(v) = (u >> (64 - k)) | (w << k);
+        })
+    }
+
+    // zero the lower words, simulating that we shifted the bits up.
+    EACH_WORD_TO(v, offset, WORD(v) = 0);
+
+    // clean up the bits we might have shifted beyond the end
+    bv_clean(v);
+
+    return v;
+}
+```
+
+I'm not sure which version I prefer myself.
+
+```c
+struct bv *bv_shift_down(struct bv *v, size_t m)
+{
+    size_t k = m % 64;
+    size_t offset = m / 64;
+
+    // From zero up to (n - offset) we shift and or to get the bit patterns.
+    EACH_WORD_TO(v, NWORDS(v) - offset, {
+        uint64_t u = WORD_AFTER(v, offset);
+        uint64_t w = WORD_AFTER(v, offset + 1);
+        WORD(v) = RSHIFT(u, k) | LSHIFT(w, 64 - k);
+    })
+
+    // zero the upper words, simulating that we shifted the bits down.
+    EACH_WORD_REV_TO(v, NWORDS(v) - offset, WORD(v) = 0);
+
+    // clean up the bits we might have shifted beyond the end
+    bv_clean(v);
+
+    return v;
+}
+```
 
 
 [^1]: But not more than $2^{64} \approx 1.8\times 10^{19}$ with 64-bit pointers, and actually less on modern 64-bit systems, but this limit is far higher than the limit set by your physical memory available.

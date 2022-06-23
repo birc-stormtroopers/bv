@@ -127,15 +127,22 @@ struct bv *bv_shift_up(struct bv *v, size_t m)
     size_t k = m % 64;
     size_t offset = m / 64;
 
-    // From offset and up, we shift and or to get the bit patterns,
-    // going through the words in reverse.
-    // clang-format off
-    EACH_WORD_REV_TO(v, offset, {
-        uint64_t u = WORD_BEFORE(v, offset + 1);
-        uint64_t w = WORD_BEFORE(v, offset);
-        WORD(v) = RSHIFT(u, 64 - k) | LSHIFT(w, k);
-    })
-    // clang-format on
+    if (k == 0)
+    {
+        EACH_WORD_REV_TO(v, offset, WORD(v) = WORD_BEFORE(v, offset));
+    }
+    else
+    {
+        // From offset and up, we shift and or to get the bit patterns,
+        // going through the words in reverse.
+        // clang-format off
+        EACH_WORD_REV_TO(v, offset, {
+            uint64_t u = WORD_BEFORE(v, offset + 1);
+            uint64_t w = WORD_BEFORE(v, offset);
+            WORD(v) = (u >> (64 - k)) | (w << k);
+        })
+        // clang-format on
+    }
 
     // zero the lower words, simulating that we shifted the bits up.
     EACH_WORD_TO(v, offset, WORD(v) = 0);
