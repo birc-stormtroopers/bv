@@ -108,11 +108,36 @@ uint64_t w64_vec[round_up(150, 64)]; // representing bits as 64-bit words
 
 You have larger word sizes, but these will fit into registers on my machine.
 
-Now the only question is how we will access bit `k` in such an array of words?
+If you are wondering what word size you should use, its a good question, but the answer is that it doesn't matter that much. The smaller words you use, the fewer excess bits you use if your vector doesn't span an integral number of words, but the larger the words you have, the more operations you can do in parallel when you do full-word bit operations. But it is a constant factor in any case, so it hardly matters that much. If we go from bytes to 64-bit words, it is a factor eight that's the difference. I personally prefer to use large words, to get the factor of eight in speed, at the cost of wasting up to 63 bits instead of 7, as that size difference hardly matters in any application, but it is just an arbitrary choice.
 
-**FIXME: more**
+Now the only question remaining is how we will access bit `k` in such an array of words?
+
+If we have multiple words in an array `A`, then the first word is at `A[0]`, the second at `A[1]`, the third at `A[2]` and so on, and if the word size is `ws`, then there are `ws` bits in the first word, `ws` bits in the second, and so on. To get at bit `k`, you need word `A[k/ws]` (where `k/ws` rounds down; it would be `k//ws` in Python). That's because
+$$k = \mathrm{ws}\cdot\lfloor k/\mathrm{ws} \rfloor + k\mod\mathrm{ws}$$
+and since we index from zero there are $\lfloor k/\mathrm{ws} \rfloor$
+words before index $\lfloor k/\mathrm{ws} \rfloor$.
+
+The same formula tells us that in word `A[k/ws]`, we want bit `k % ws`.
 
 ![Bit vector spanning multiple words](figs/bv/array-of-words.png)
+
+A quick comment on notation is necessary here. When we write numbers, the lowest bit is to the right and the highest to the right, as on the figure. However, when we write arrays, the first word is written on the left.
+
+![Vector versus word view](figs/bv/vector-vs-word-view.png)
+
+This is an artifact of how we usually write in European culture, but it means that "left" and "right" can get confusing. If, for example, you need to move a bit from a low to a higher index, so move it right in the bit vector, you have to move it left in the word. If you are moving in a single word, it is a simple left shift, `w << k`
+
+![Shifting for k < ws](figs/bv/vector-vs-word-view-shift-small-k.png)
+
+and if you need to shift for more than a word, you have to count the word index up and move the bit to the left.
+
+![Shift for k >= ws](figs/bv/vector-vs-word-view-shift-large-k.png)
+
+As long as you are not shifting, though, you don't have to worry about that conceptual difference.
+
+## Implementing a bit vector
+
+With all those considerations in place, we can now implement a bit vector spanning multiple words. I have implemented one in C, as a struct that contains the vector's length and then the words immidiately following those.
 
 ```c
 struct bv
@@ -120,15 +145,57 @@ struct bv
     size_t len;
     uint64_t data[];
 };
+```
 
+The bit that looks like an empty array, `uint64_t data[]`, is a C trick known as a [flexible array member](https://en.wikipedia.org/wiki/Flexible_array_member) and it allows me to allocate the entire vector in a single operation. If you are not programming in C, you can easily ignore that. The magic for using a flexible array member is ugly, anyway, but for completeness it is here:
+
+```c
+static inline size_t no_words(size_t no_bits)
+{
+    // Divide into 64-bit words, rounding up.
+    return (no_bits + 63) / 64;
+}
+
+struct bv *bv_alloc(size_t no_bits)
+{
+    size_t header = offsetof(struct bv, data);
+    size_t data = sizeof(uint64_t) * no_words(no_bits);
+    // Use calloc to satisfy static analysis.
+    // It has the added benefit that all new vectors are 0-initialised.
+    struct bv *v = calloc(1, header + data);
+    assert(v); // We don't handle allocation errors
+    v->len = no_bits;
+    return v;
+}
+
+struct bv *bv_new(size_t len)
+{
+    return bv_alloc(len);
+}
+
+struct bv *bv_new_from_string(const char *str)
+{
+    size_t len = strlen(str); // FlawFinder: ignore (I know about '\0')
+    struct bv *v = bv_alloc(len);
+    for (size_t i = 0; *str; i++, str++)
+    {
+        // set to zero if *str == '0' and one otherwise
+        bv_set(v, i, *str != '0');
+    }
+    return v;
+}
+```
+
+I've written two constructors, `bv_new()` and `bv_new_from_string()` that shares an allocator `bv_alloc()`. The `bv_new_from_string()` lets me construct vectors from a description of its bits, e.g., `bv_new_from_string("10010)`, but it is mostly for testing purposes. The string would take eight times as much space as the bit vector, so for long vectors it is not an efficient approach. I use the `calloc()` function to allocate memory. That will initialise all the memory as zero-bits, so the `bv_new()` function will always return a vector of all zeros.
+
+The getter and setter functions for individual bits look like this:
+
+```c
 // Any optimising compiler will work out that / and % can be translated into
 // bit shifts and masking when it knows the divisor and the divisor is a power
 // of two.
-
-// clang-format off
 static inline size_t bv_widx(size_t i) { return i / 64; }
 static inline size_t bv_bidx(size_t i) { return i % 64; }
-// clang-format on
 
 static inline bool bv_get(struct bv *v, size_t i)
 {
@@ -150,6 +217,174 @@ static inline struct bv *bv_set(struct bv *v, size_t i, bool b)
 }
 ```
 
+The comment at the top just says that I use `i / 64` and `i % 64` even though division operations are more expensive than bit operations on the CPU, but the compiler can figure out that I can divide by 64 by shifting the word by 6 (`i / 64 == i >> 6`) and that I can get the remainder with a mask, `i % 64 == i & 63`. So I get fast bit operations without the confusing notation of bit operations. This only works because 64 is a constant that the compiler knows when it compiles, though, and sometimes you want to consider replacing division/remainder with bit operations.
+
+The command about chained calls is something I am not entirely convinced is a good idea. The idea is that I can chain a bit vector construction with setting individual bits
+
+```c
+  struct bv *v = bv_new_from_string("10010");
+  struct bv *w = bv_set(bv_set(bv_new(5), 1, 1), 4, 1);
+  assert(bv_eq(v, w)); // The two vectors are equal
+```
+
+A problem is that the function really works with side-effects and if you combine calls of this kind you are modifying the same data, so it is potentially dangerous. I chose convinience over safety, but my choice might have been different any other day.
+
+### Operations
+
+The `bv_eq()` function I just used compares two vectors. It sounds like an easy operator to implement, but there are some interesting issues to consider.
+
+If we say that two vectors are the same if their bits are the same (which is the obvious definition), we might think we can just compare the vectors word-wise.
+
+```c
+bool bv_eq(struct bv const *v, struct bv const *w)
+{
+    if (v->len != w->len) return false;
+    for (size_t i = 0; i < no_words(v->len); i++)
+        if (v->data[i] != w->data[i]) return false;
+    return true;
+}
+```
+
+That is almost true, but it requires that all the bits are the same, including those bits that sits in the last word beyond the bit-length of the vector.
+
+If we made the two length-five vectors we did above, we only use five out of 64 bits, so there are 59 bits that shouldn't affect whether we consider the two vectors the same. When we allocate vectors, those bits are zero, but if we start shifting bits around, they might not be.
+
+Here we have a choice: either we have to mask out the bits in `bv_eq()` to ignore them, or we need to handle that there might be set bits off the end of the vector.
+
+The latter choice is the better for an important reason. If we shift bits up and then down again, the expected behaviour from how individual words behave is that they get set to zero. They won't if we don't explicitly set them to zero when we have additional bits in the vector. So, I've implemented a function that clears the extra bits, and made the rule that if I modify those extra bits, I have to clean them again afterwards.
+
+```c
+// A vector is "dirty" if there are set bits in the last word, beyond the
+// last bit. This can happen with shifts, but it complicates some computations
+// if we have to mask those out for comparisons or shifts. In those case,
+// we should "clean" the vector first.
+static void bv_clean(struct bv *v)
+{
+    size_t k = v->len % 64;
+    if (k != 0) // if k == 0 there are no extra bits.
+    {
+        uint64_t mask = (1 << k) - 1;          // lower k words; we want to keep them.
+        v->data[no_words(v->len) - 1] &= mask; // remove the other bits.
+    }
+}
+```
+
+When I started implementing operations, I also noticed that it was mostly boiler-plate code. Running through all the words in the vector and performing some operations, again and again. It isn't much of a problem, but I miss the vectorised operations from R or Numpy, so I decided to write macros to get them.
+
+
+```c
+#define NWORDS(VEC) no_words((VEC)->len)
+
+// The word at the current index
+#define WORD(VEC) ((VEC)->data[i_])
+
+// Word offset to the left of the current index.
+#define WORD_BEFORE(VEC, OFFSET) \
+    (((OFFSET) <= i_) ? ((VEC)->data[i_ - (OFFSET)]) : (uint64_t)0)
+// Word offset to the right of the current index.
+#define WORD_AFTER(VEC, OFFSET) \
+    ((((OFFSET) + i_) < NWORDS(VEC)) ? ((VEC)->data[i_ + (OFFSET)]) : (uint64_t)0)
+
+#define EACH_WORD(VEC, ...)            EACH_WORD_FROM(VEC, 0, __VA_ARGS__)
+#define EACH_WORD_FROM(VEC, FROM, ...) EACH_WORD_RANGE(VEC, FROM, NWORDS(VEC), __VA_ARGS__)
+#define EACH_WORD_TO(VEC, TO, ...)     EACH_WORD_RANGE(VEC, 0, TO, __VA_ARGS__)
+#define EACH_WORD_RANGE(VEC, FROM, TO, ...)   \
+    for (size_t i_ = (FROM); i_ < (TO); i_++) \
+    {                                         \
+        __VA_ARGS__;                          \
+    }
+
+#define EACH_WORD_REV_TO(VEC, TO, ...)                      \
+    for (size_t ii_ = 0; ii_ < (NWORDS(VEC) - (TO)); ii_++) \
+    {                                                       \
+        size_t i_ = NWORDS(VEC) - ii_ - 1;                  \
+        __VA_ARGS__;                                        \
+    }
+```
+
+The `NWORDS()` macro tells me how many words I have in a macro. The `WORD()` macro gives me the word at index `i_`, where I use `i_` to refer to indices in the `EACH_WORD...` macros. The `WORD_BEFORE()` and `WORD_AFTER()` macros just adds offsets to those, so `WORD_BEFORE(v, 1)` will give me the word before the current one in vector `v` and `WORD_AFTER(v, 2)` will give me the word two indices after the current one. If I am not indexing at the current index, which I can guarantee refers to a valid word, then I might index out of bounds, and to avoid handling special cases, I just say that I have zero bits beyond the edges of the vector. That will work the expected way with any shifting.
+
+The `EACH_WORD...` macros are just loops through the words in a vector. They vary in where the edges in the iteration is, and the `EACH_WORD_REV_TO()` macro runs through the words in reverse. (I only needed one reverse loop so there is only one variant of that).
+
+With these macros, the `bv_eq()` function looks like this:
+
+```c
+bool bv_eq(struct bv const *v, struct bv const *w)
+{
+    if (v->len != w->len) return false;
+    EACH_WORD(v,
+      if (WORD(v) != WORD(w)) return false
+    );
+    return true;
+}
+```
+
+Not a huge difference, I agree, but the macros help a little in more complicated functions.
+
+Using these macros is another point where I am not sure I made the right choice. They have the benefit of giving me a small language to write vector expressions in, but at the cost of having to understand the macros and how they interact, since those expressions are no longer pure and simple C code. I honestly don't know if it was worth it, but this is what I did, so that is what I show.
+
+We can easily implement a bunch of operations using the macros. The operations generally return their input vector, so I can chain operations, but as I mentioned above, that might not be a great idea. It is just a convinient idea.
+
+```c
+// set v to all zeros
+struct bv *bv_zero(struct bv *v)
+{
+    EACH_WORD(v, WORD(v) = (uint64_t)0);
+    return v;
+}
+
+// set v to all 1
+struct bv *bv_one(struct bv *v)
+{
+    EACH_WORD(v, WORD(v) = ~(uint64_t)0);
+    bv_clean(v); // Don't leave 1s in unused bits
+    return v;
+}
+
+// flip all the bits in v
+struct bv *bv_neg(struct bv *v)
+{
+    EACH_WORD(v, WORD(v) = ~WORD(v));
+    bv_clean(v); // Don't leave 1s in unused bits
+    return v;
+}
+
+// v |= w
+struct bv *bv_or_assign(struct bv *v, struct bv const *w)
+{
+    assert(v->len == w->len);
+    EACH_WORD(v, WORD(v) |= WORD(w));
+    return v;
+}
+
+// v &= w
+struct bv *bv_and_assign(struct bv *v, struct bv const *w)
+{
+    assert(v->len == w->len);
+    EACH_WORD(v, WORD(v) &= WORD(w));
+    return v;
+}
+
+// v | w
+struct bv *bv_or(struct bv const *v, struct bv const *w)
+{
+    assert(v->len == w->len);
+    struct bv *u = bv_alloc(v->len);
+    EACH_WORD(u, WORD(u) = WORD(v) | WORD(w));
+    return u;
+}
+
+// v & w
+struct bv *bv_and(struct bv const *v, struct bv const *w)
+{
+    assert(v->len == w->len);
+    struct bv *u = bv_alloc(v->len);
+    EACH_WORD(u, WORD(u) = WORD(v) & WORD(w));
+    return u;
+}
+```
+
+The functions that can set any of the unused bits must call `bv_clean()`. Of the above, those are `bv_one()` that will set all bits to one, so some must be flipped back, and `bv_neg()` that will leave one-bits where there were previously zero-bits. For the others, if the input vectors are clean, then the output will also be clean.
 
 
 

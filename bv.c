@@ -78,6 +78,20 @@ struct bv *bv_new_from_string(const char *str)
     return v;
 }
 
+// A vector is "dirty" if there are set bits in the last word, beyond the
+// last bit. This can happen with shifts, but it complicates some computations
+// if we have to mask those out for comparisons or shifts. In those case,
+// we should "clean" the vector first.
+static void bv_clean(struct bv *v)
+{
+    size_t k = v->len % 64;
+    if (k != 0) // if k == 0 there are no extra bits.
+    {
+        uint64_t mask = (1 << k) - 1;          // lower k words; we want to keep them.
+        v->data[no_words(v->len) - 1] &= mask; // remove the other bits.
+    }
+}
+
 struct bv *bv_copy(struct bv const *v)
 {
     struct bv *w = bv_alloc(v->len);
@@ -95,27 +109,15 @@ struct bv *bv_zero(struct bv *v)
 struct bv *bv_one(struct bv *v)
 {
     EACH_WORD(v, WORD(v) = ~(uint64_t)0);
+    bv_clean(v); // Don't leave 1s in unused bits
     return v;
 }
 
 struct bv *bv_neg(struct bv *v)
 {
     EACH_WORD(v, WORD(v) = ~WORD(v));
+    bv_clean(v); // Don't leave 1s in unused bits
     return v;
-}
-
-// A vector is "dirty" if there are set bits in the last word, beyond the
-// last bit. This can happen with shifts, but it complicates some computations
-// if we have to mask those out for comparisons or shifts. In those case,
-// we should "clean" the vector first.
-static void bv_clean(struct bv *v)
-{
-    size_t k = v->len % 64;
-    if (k != 0) // if k == 0 there are no extra bits.
-    {
-        uint64_t mask = (1 << k) - 1;          // lower k words; we want to keep them.
-        v->data[no_words(v->len) - 1] &= mask; // remove the other bits.
-    }
 }
 
 // MARK Operations
