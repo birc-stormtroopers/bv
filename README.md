@@ -495,6 +495,39 @@ struct bv *bv_shift_down(struct bv *v, size_t m)
 }
 ```
 
+## Application: The SHIFT-and-OR (Dömölki-(Baeza-Yates)-Gonnet) pattern matching algorithm
+
+Let's wrap the topic with an application of bit vectors. There are countless to choose from, but I've picked an algorithm for so-called exact pattern matching, which is a fancy term for finding out where a pattern, `p`, (a string) occurrs in another string.
+
+A simple approach to finding occurrences is something like this: run though each position `i` in `x` and imagine placing `p` there, so `p[0]` aligns with `x[i]`. Then match forward from zero to the length of `p`, `m`, as long as the characters matches, `p[j] == x[i + j]`. If there is a mismatch, break from the inner loop and move `i` forward. If you get to `j == m - 1` in the inner loop (that you only enter if the characters match), then all `m` characters of `p` matches at position `i`, and you can report an occurrence.
+
+```c
+void match(const char *x, const char *p)
+{
+    size_t n = strlen(x);
+    size_t m = strlen(p);
+    for (size_t i; i < n; i++)
+    {
+        for (size_t j = 0; j < m && (x[i + j] == p[j]); j++)
+        {
+            if (j == m - 1)
+            {
+                printf("We have a match at %lu.\n", i);
+            }
+        }
+    }
+}
+```
+
+This approach runs in $O(nm)$, but there is very little overhead in it, so it is usually efficient enough. However, for genome scale strings, we want something faster.
+You can get $O(n + m)$ or even better (if you add some preprocessing and search for multiple patterns, like in a read-mapping application). There is an entire class on that, so I won't go on and on about it. Instead, I will show you another
+$O(nm)$ algorithm that we can speed up with bit vectors.
+The *SHIFT-and-OR* algorithm uses time $O(nm/\mathrm{ws})$, which if word sizes are constant (which they are) is still
+$O(nm)$, but if the word size is 64 you are potentially dividing the running time by 64. (It isn't quite that good, because there is additioanl overhead in the SHIFT-and-OR algorithm, but it usually is a rather fast algorithm in many applications).
+
+
+
+
 
 [^1]: But not more than $2^{64} \approx 1.8\times 10^{19}$ with 64-bit pointers, and actually less on modern 64-bit systems, but this limit is far higher than the limit set by your physical memory available.
 
